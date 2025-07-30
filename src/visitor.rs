@@ -91,6 +91,110 @@ pub struct Function {
     pub attributes: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct FileAnalysis {
+    pub file_path: String,
+    pub functions: Vec<Function>,
+    pub trait_method_signatures: Vec<TraitMethodSignature>,
+    pub impl_blocks: Vec<ImplBlock>,
+    pub module_declarations: Vec<ModuleDeclaration>,
+    pub use_statements: Vec<UseStatement>,
+    pub type_definitions: Vec<TypeDefinition>,
+    pub constant_definitions: Vec<ConstantDefinition>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct TraitMethodSignature {
+    pub name: String,
+    pub fully_qualified_path: String,
+    pub input_types: Vec<TypeOriginInfo>,
+    pub output_types: Vec<TypeOriginInfo>,
+    pub src_location: String,
+    pub src_code: String,
+    pub line_number_start: usize,
+    pub line_number_end: usize,
+    pub crate_name: String,
+    pub module_path: String,
+    pub visibility: String,
+    pub doc_comments: String,
+    pub attributes: Vec<String>,
+    pub is_async: bool,
+    pub is_unsafe: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ImplBlock {
+    pub name: String,
+    pub implementing_type: Option<TypeOriginInfo>,
+    pub trait_type: Option<TypeOriginInfo>,
+    pub src_location: String,
+    pub src_code: String,
+    pub line_number_start: usize,
+    pub line_number_end: usize,
+    pub crate_name: String,
+    pub module_path: String,
+    pub visibility: String,
+    pub doc_comments: String,
+    pub attributes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ModuleDeclaration {
+    pub name: String,
+    pub fully_qualified_path: String,
+    pub src_location: String,
+    pub line_number: usize,
+    pub crate_name: String,
+    pub module_path: String,
+    pub visibility: String,
+    pub doc_comments: String,
+    pub attributes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UseStatement {
+    pub path: String,
+    pub src_location: String,
+    pub line_number: usize,
+    pub crate_name: String,
+    pub module_path: String,
+    pub visibility: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct TypeDefinition {
+    pub name: String,
+    pub fully_qualified_path: String,
+    pub type_kind: String, // "struct", "enum", "union", "type_alias"
+    pub fields: Vec<TypeOriginInfo>,
+    pub src_location: String,
+    pub src_code: String,
+    pub line_number_start: usize,
+    pub line_number_end: usize,
+    pub crate_name: String,
+    pub module_path: String,
+    pub visibility: String,
+    pub doc_comments: String,
+    pub attributes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ConstantDefinition {
+    pub name: String,
+    pub fully_qualified_path: String,
+    pub const_type: Option<TypeOriginInfo>,
+    pub src_location: String,
+    pub src_code: String,
+    pub line_number_start: usize,
+    pub line_number_end: usize,
+    pub crate_name: String,
+    pub module_path: String,
+    pub visibility: String,
+    pub doc_comments: String,
+    pub attributes: Vec<String>,
+    pub is_static: bool,
+}
+
 #[derive(Hash, PartialEq, Eq, Debug)]
 pub struct Call {
     // the call expression
@@ -115,6 +219,17 @@ pub struct CallgraphVisitor<'tcx> {
     pub function_data: Vec<Function>,
     pub curr_module_path: Vec<String>,
     pub output_dir: Option<PathBuf>,
+    
+    // Additional data structures for comprehensive analysis
+    pub trait_method_signatures: Vec<TraitMethodSignature>,
+    pub impl_blocks: Vec<ImplBlock>,
+    pub module_declarations: Vec<ModuleDeclaration>,
+    pub use_statements: Vec<UseStatement>,
+    pub type_definitions: Vec<TypeDefinition>,
+    pub constant_definitions: Vec<ConstantDefinition>,
+    
+    // Track all files visited
+    pub visited_files: HashSet<String>,
 }
 
 impl<'tcx> CallgraphVisitor<'tcx> {
@@ -125,6 +240,13 @@ impl<'tcx> CallgraphVisitor<'tcx> {
             function_data: Vec::new(),
             curr_module_path: Vec::new(),
             output_dir: None,
+            trait_method_signatures: Vec::new(),
+            impl_blocks: Vec::new(),
+            module_declarations: Vec::new(),
+            use_statements: Vec::new(),
+            type_definitions: Vec::new(),
+            constant_definitions: Vec::new(),
+            visited_files: HashSet::new(),
         }
     }
 
@@ -139,18 +261,147 @@ impl<'tcx> CallgraphVisitor<'tcx> {
         if let Some(output_dir) = &self.output_dir {
             // Create output directory if it doesn't exist
             fs::create_dir_all(output_dir).expect("Failed to create output directory");
-            // Group functions by file
-            let mut file_to_functions: HashMap<String, Vec<Function>> = HashMap::new();
+            
+            // Group all data by file
+            let mut file_to_analysis: HashMap<String, FileAnalysis> = HashMap::new();
 
+            // Group functions by file
             for function in &self.function_data {
-                file_to_functions
-                    .entry(function.src_location.to_string())
-                    .or_default()
-                    .push(function.clone());
+                let analysis = file_to_analysis
+                    .entry(function.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: function.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.functions.push(function.clone());
+            }
+
+            // Group trait method signatures by file
+            for trait_method in &self.trait_method_signatures {
+                let analysis = file_to_analysis
+                    .entry(trait_method.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: trait_method.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.trait_method_signatures.push(trait_method.clone());
+            }
+
+            // Group impl blocks by file
+            for impl_block in &self.impl_blocks {
+                let analysis = file_to_analysis
+                    .entry(impl_block.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: impl_block.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.impl_blocks.push(impl_block.clone());
+            }
+
+            // Group module declarations by file
+            for module_decl in &self.module_declarations {
+                let analysis = file_to_analysis
+                    .entry(module_decl.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: module_decl.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.module_declarations.push(module_decl.clone());
+            }
+
+            // Group use statements by file
+            for use_stmt in &self.use_statements {
+                let analysis = file_to_analysis
+                    .entry(use_stmt.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: use_stmt.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.use_statements.push(use_stmt.clone());
+            }
+
+            // Group type definitions by file
+            for type_def in &self.type_definitions {
+                let analysis = file_to_analysis
+                    .entry(type_def.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: type_def.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.type_definitions.push(type_def.clone());
+            }
+
+            // Group constant definitions by file
+            for const_def in &self.constant_definitions {
+                let analysis = file_to_analysis
+                    .entry(const_def.src_location.clone())
+                    .or_insert_with(|| FileAnalysis {
+                        file_path: const_def.src_location.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                analysis.constant_definitions.push(const_def.clone());
+            }
+
+            // Ensure all visited files have at least an empty analysis
+            for file_path in &self.visited_files {
+                if !file_to_analysis.contains_key(file_path) {
+                    file_to_analysis.insert(file_path.clone(), FileAnalysis {
+                        file_path: file_path.clone(),
+                        functions: Vec::new(),
+                        trait_method_signatures: Vec::new(),
+                        impl_blocks: Vec::new(),
+                        module_declarations: Vec::new(),
+                        use_statements: Vec::new(),
+                        type_definitions: Vec::new(),
+                        constant_definitions: Vec::new(),
+                    });
+                }
             }
 
             // Create output directories mirroring the project structure
-            for (file_path, functions) in &file_to_functions {
+            for (file_path, analysis) in &file_to_analysis {
                 // Create output path that mirrors the source file structure
                 println!("file_path : {:?}", file_path);
                 let path = PathBuf::from(file_path);
@@ -166,8 +417,8 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                 let json_name = format!("{}.json", file_name.replace(".rs", ""));
                 let json_path = output_file_dir.join(json_name);
 
-                let json = serde_json::to_string_pretty(&functions)
-                    .expect("Failed to serialize file functions");
+                let json = serde_json::to_string_pretty(&analysis)
+                    .expect("Failed to serialize file analysis");
                 match fs::write(&json_path, json) {
                     Ok(_) => {}
                     Err(err) => println!(
@@ -233,14 +484,20 @@ impl<'tcx> CallgraphVisitor<'tcx> {
 
     pub fn format_span(&self, span: Span) -> String {
         let source_map = self.tcx.sess.source_map();
-        source_map
+        match source_map
             .span_to_filename(span)
-            .into_local_path()
-            .unwrap()
-            .as_path()
+            .into_local_path() {
+                Some(x) => {
+                    x.as_path()
             .to_str()
             .unwrap()
             .to_owned()
+                }
+                , None => {
+                    "".to_string()
+                }
+            }
+            
     }
 
     pub fn get_line_number(&self, span: Span) -> usize {
@@ -406,14 +663,13 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                     src_location: self.format_span(*span),
                 })
             }
-            _ => None,
         }
     }
 
     pub fn extract_type_origin_info(&self, hir_ty: &rustc_hir::Ty<'_>) -> Option<TypeOriginInfo> {
         match &hir_ty.kind {
             rustc_hir::TyKind::Path(qpath) => self.extract_type_from_qpath(qpath, hir_ty.span),
-            rustc_hir::TyKind::Ref(lifetime, mutty) => {
+            rustc_hir::TyKind::Ref(_lifetime, mutty) => {
                 let mut base_type = self.extract_type_origin_info(mutty.ty)?;
                 base_type.type_name = format!(
                     "&{}{}",
@@ -742,7 +998,7 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                     None
                 }
             }
-            TyKind::FnDef(def_id, substs) => {
+            TyKind::FnDef(def_id, _substs) => {
                 let crate_name = self.tcx.crate_name(def_id.krate).to_string();
                 let def_path = self.tcx.def_path(*def_id);
 
@@ -751,7 +1007,7 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                     path_segments.push(data.data.to_string());
                 }
 
-                let fn_name = path_segments
+                let _fn_name = path_segments
                     .last()
                     .cloned()
                     .unwrap_or_else(|| "unknown".to_string());
@@ -807,7 +1063,7 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                     src_location: "".to_string(),
                 })
             }
-            TyKind::FnPtr(poly_fn_sig) => {
+            TyKind::FnPtr(poly_fn_sig,_) => {
                 let fn_sig = poly_fn_sig.skip_binder();
 
                 let mut param_types = Vec::new();
@@ -982,7 +1238,7 @@ impl<'tcx> CallgraphVisitor<'tcx> {
 
                 match &expr.kind {
                     // Function calls
-                    rustc_hir::ExprKind::Call(func, args) => {
+                    rustc_hir::ExprKind::Call(func, _args) => {
                         if let rustc_hir::ExprKind::Path(qpath) = &func.kind {
                             let res = typeck.qpath_res(qpath, func.hir_id);
 
@@ -1052,7 +1308,7 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                     }
 
                     // Method calls
-                    rustc_hir::ExprKind::MethodCall(path, receiver, args, span) => {
+                    rustc_hir::ExprKind::MethodCall(path, receiver, _args, _span) => {
                         let method_name = path.ident.to_string();
                         let span = path.ident.span;
 
@@ -1176,7 +1432,7 @@ impl<'tcx> CallgraphVisitor<'tcx> {
                         let mut input_types = Vec::new();
                         let mut output_types = Vec::new();
 
-                        if let TyKind::Closure(def_id, substs) = closure_ty.kind() {
+                        if let TyKind::Closure(_def_id, substs) = closure_ty.kind() {
                             let closure_sig = substs.as_closure().sig();
                             let sig = closure_sig.skip_binder();
 
@@ -1372,6 +1628,401 @@ impl<'tcx> CallgraphVisitor<'tcx> {
         // println!("{:?}",function_info);
         self.function_data.push(function_info);
     }
+
+    pub fn process_trait_method_signature(
+        &mut self,
+        sig: &rustc_hir::FnSig<'tcx>,
+        hir_id: HirId,
+        span: Span,
+        method_name: &str,
+    ) {
+        let def_id = hir_id.owner.to_def_id();
+        let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+        let module_path = self.current_module_path();
+
+        let fully_qualified_path = if module_path.is_empty() {
+            format!("{}::{}", crate_name, method_name)
+        } else {
+            format!("{}::{}::{}", crate_name, module_path, method_name)
+        };
+
+        let src_loc = self.format_span(span);
+        let src_code = self
+            .tcx
+            .sess
+            .source_map()
+            .span_to_snippet(span)
+            .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+        let line_start = self.get_line_number(span);
+        let line_end = self.tcx.sess.source_map().lookup_char_pos(span.hi()).line;
+
+        let mut input_types = Vec::new();
+        for param in sig.decl.inputs.iter() {
+            if let Some(type_info) = self.extract_type_origin_info(param) {
+                input_types.push(type_info);
+            }
+        }
+
+        let mut output_types = Vec::new();
+        if let rustc_hir::FnRetTy::Return(ty) = &sig.decl.output {
+            if let Some(type_info) = self.extract_type_origin_info(*ty) {
+                output_types.push(type_info);
+            }
+        } else {
+            output_types.push(TypeOriginInfo {
+                type_name: "()".to_string(),
+                crate_name: "core".to_string(),
+                module_path: "primitive".to_string(),
+                generic_args: Vec::new(),
+                is_generic_param: false,
+                src_location: "".to_string(),
+            });
+        }
+
+        let visibility = self.extract_visibility(hir_id.owner);
+        let doc_comments = self.extract_doc_comments(hir_id);
+        let attributes = self.get_attrs_string(hir_id);
+
+        let trait_method = TraitMethodSignature {
+            name: method_name.to_string(),
+            fully_qualified_path,
+            input_types,
+            output_types,
+            src_location: src_loc,
+            src_code,
+            line_number_start: line_start,
+            line_number_end: line_end,
+            crate_name,
+            module_path,
+            visibility,
+            doc_comments,
+            attributes,
+            is_async: sig.header.asyncness.is_async(),
+            is_unsafe: sig.header.safety == rustc_hir::Safety::Unsafe,
+        };
+
+        self.trait_method_signatures.push(trait_method);
+    }
+
+    pub fn process_impl_block(
+        &mut self,
+        impl_: &rustc_hir::Impl<'tcx>,
+        hir_id: HirId,
+        span: Span,
+    ) {
+        let def_id = hir_id.owner.to_def_id();
+        let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+        let module_path = self.current_module_path();
+
+        let implementing_type = self.extract_type_origin_info(impl_.self_ty);
+        let trait_type = impl_.of_trait.as_ref().and_then(|trait_ref| {
+            // Extract trait name from trait reference
+            let trait_name = trait_ref.path.segments.last()
+                .map(|seg| seg.ident.to_string())
+                .unwrap_or_else(|| "unknown_trait".to_string());
+            
+            Some(TypeOriginInfo {
+                type_name: trait_name,
+                crate_name: "unknown".to_string(),
+                module_path: "unknown".to_string(),
+                generic_args: Vec::new(),
+                is_generic_param: false,
+                src_location: self.format_span(span),
+            })
+        });
+
+        let impl_name = if let Some(trait_type) = &trait_type {
+            if let Some(implementing_type) = &implementing_type {
+                format!("impl {} for {}", trait_type.type_name, implementing_type.type_name)
+            } else {
+                format!("impl {}", trait_type.type_name)
+            }
+        } else if let Some(implementing_type) = &implementing_type {
+            format!("impl {}", implementing_type.type_name)
+        } else {
+            "impl".to_string()
+        };
+
+        let src_loc = self.format_span(span);
+        let src_code = self
+            .tcx
+            .sess
+            .source_map()
+            .span_to_snippet(span)
+            .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+        let line_start = self.get_line_number(span);
+        let line_end = self.tcx.sess.source_map().lookup_char_pos(span.hi()).line;
+
+        let visibility = self.extract_visibility(hir_id.owner);
+        let doc_comments = self.extract_doc_comments(hir_id);
+        let attributes = self.get_attrs_string(hir_id);
+
+        let impl_block = ImplBlock {
+            name: impl_name,
+            implementing_type,
+            trait_type,
+            src_location: src_loc,
+            src_code,
+            line_number_start: line_start,
+            line_number_end: line_end,
+            crate_name,
+            module_path,
+            visibility,
+            doc_comments,
+            attributes,
+        };
+
+        self.impl_blocks.push(impl_block);
+    }
+
+    pub fn process_module_declaration(
+        &mut self,
+        item: &rustc_hir::Item<'_>,
+    ) {
+        let hir_id = item.hir_id();
+        let def_id = hir_id.owner.to_def_id();
+        let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+        let module_path = self.current_module_path();
+
+        let module_name = item.ident.to_string();
+        let fully_qualified_path = if module_path.is_empty() {
+            format!("{}::{}", crate_name, module_name)
+        } else {
+            format!("{}::{}::{}", crate_name, module_path, module_name)
+        };
+
+        let src_loc = self.format_span(item.span);
+        let line_number = self.get_line_number(item.span);
+
+        let visibility = self.extract_visibility(hir_id.owner);
+        let doc_comments = self.extract_doc_comments(hir_id);
+        let attributes = self.get_attrs_string(hir_id);
+
+        let module_decl = ModuleDeclaration {
+            name: module_name,
+            fully_qualified_path,
+            src_location: src_loc,
+            line_number,
+            crate_name,
+            module_path,
+            visibility,
+            doc_comments,
+            attributes,
+        };
+
+        self.module_declarations.push(module_decl);
+    }
+
+    pub fn process_use_statement(
+        &mut self,
+        item: &rustc_hir::Item<'_>,
+        _use_kind: &rustc_hir::UseKind,
+    ) {
+        let hir_id = item.hir_id();
+        let def_id = hir_id.owner.to_def_id();
+        let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+        let module_path = self.current_module_path();
+
+        // Extract the full source code of the use statement
+        let path = self
+            .tcx
+            .sess
+            .source_map()
+            .span_to_snippet(item.span)
+            .unwrap_or_else(|_| "use <unknown>".to_string());
+            
+        let src_loc = self.format_span(item.span);
+        let line_number = self.get_line_number(item.span);
+        let visibility = self.extract_visibility(hir_id.owner);
+
+        // Debug print to understand what's happening
+        // println!("Processing use statement: '{}' at line {}", path, line_number);
+
+        let use_stmt = UseStatement {
+            path,
+            src_location: src_loc,
+            line_number,
+            crate_name,
+            module_path,
+            visibility,
+        };
+
+        self.use_statements.push(use_stmt);
+    }
+
+    fn extract_use_path_from_item(&self, item: &rustc_hir::Item<'_>) -> String {
+        // Extract use path from the item span
+        self.tcx
+            .sess
+            .source_map()
+            .span_to_snippet(item.span)
+            .unwrap_or_else(|_| "use <unknown>".to_string())
+    }
+
+    fn extract_use_path(&self, _path: &str) -> String {
+        // Simplified version - just return the path as string
+        "use statement".to_string()
+    }
+
+    pub fn process_type_definition(
+        &mut self,
+        item: &rustc_hir::Item<'_>,
+        type_kind: &str,
+    ) {
+        let hir_id = item.hir_id();
+        let def_id = hir_id.owner.to_def_id();
+        let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+        let module_path = self.current_module_path();
+
+        let type_name = item.ident.to_string();
+        let fully_qualified_path = if module_path.is_empty() {
+            format!("{}::{}", crate_name, type_name)
+        } else {
+            format!("{}::{}::{}", crate_name, module_path, type_name)
+        };
+
+        let src_loc = self.format_span(item.span);
+        let src_code = self
+            .tcx
+            .sess
+            .source_map()
+            .span_to_snippet(item.span)
+            .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+        let line_start = self.get_line_number(item.span);
+        let line_end = self.tcx.sess.source_map().lookup_char_pos(item.span.hi()).line;
+
+        let visibility = self.extract_visibility(hir_id.owner);
+        let doc_comments = self.extract_doc_comments(hir_id);
+        let attributes = self.get_attrs_string(hir_id);
+
+        // Extract fields/variants based on type kind
+        let mut fields = Vec::new();
+        match &item.kind {
+            rustc_hir::ItemKind::Struct(variant_data, _) => {
+                fields.extend(self.extract_fields_from_variant_data(variant_data));
+            }
+            rustc_hir::ItemKind::Enum(enum_def, _) => {
+                for variant in enum_def.variants {
+                    fields.extend(self.extract_fields_from_variant_data(&variant.data));
+                }
+            }
+            rustc_hir::ItemKind::Union(variant_data, _) => {
+                fields.extend(self.extract_fields_from_variant_data(variant_data));
+            }
+            _ => {}
+        }
+
+        let type_def = TypeDefinition {
+            name: type_name,
+            fully_qualified_path,
+            type_kind: type_kind.to_string(),
+            fields,
+            src_location: src_loc,
+            src_code,
+            line_number_start: line_start,
+            line_number_end: line_end,
+            crate_name,
+            module_path,
+            visibility,
+            doc_comments,
+            attributes,
+        };
+
+        self.type_definitions.push(type_def);
+    }
+
+    pub fn process_constant_definition(
+        &mut self,
+        item: &rustc_hir::Item<'_>,
+        is_static: bool,
+    ) {
+        let hir_id = item.hir_id();
+        let def_id = hir_id.owner.to_def_id();
+        let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+        let module_path = self.current_module_path();
+
+        let const_name = item.ident.to_string();
+        let fully_qualified_path = if module_path.is_empty() {
+            format!("{}::{}", crate_name, const_name)
+        } else {
+            format!("{}::{}::{}", crate_name, module_path, const_name)
+        };
+
+        let src_loc = self.format_span(item.span);
+        let src_code = self
+            .tcx
+            .sess
+            .source_map()
+            .span_to_snippet(item.span)
+            .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+        let line_start = self.get_line_number(item.span);
+        let line_end = self.tcx.sess.source_map().lookup_char_pos(item.span.hi()).line;
+
+        let visibility = self.extract_visibility(hir_id.owner);
+        let doc_comments = self.extract_doc_comments(hir_id);
+        let attributes = self.get_attrs_string(hir_id);
+
+        let const_type = match &item.kind {
+            rustc_hir::ItemKind::Const(ty, _, _) => self.extract_type_origin_info(*ty),
+            rustc_hir::ItemKind::Static(ty, _, _) => self.extract_type_origin_info(*ty),
+            _ => None,
+        };
+
+        let const_def = ConstantDefinition {
+            name: const_name,
+            fully_qualified_path,
+            const_type,
+            src_location: src_loc,
+            src_code,
+            line_number_start: line_start,
+            line_number_end: line_end,
+            crate_name,
+            module_path,
+            visibility,
+            doc_comments,
+            attributes,
+            is_static,
+        };
+
+        self.constant_definitions.push(const_def);
+    }
+
+    fn format_path(&self, path: &rustc_hir::Path<'_>) -> String {
+        path.segments
+            .iter()
+            .map(|seg| seg.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
+    fn extract_fields_from_variant_data(
+        &self,
+        variant_data: &rustc_hir::VariantData<'_>,
+    ) -> Vec<TypeOriginInfo> {
+        let mut fields = Vec::new();
+        match variant_data {
+            rustc_hir::VariantData::Struct { fields: field_defs, .. } => {
+                for field in field_defs.iter() {
+                    if let Some(type_info) = self.extract_type_origin_info(&field.ty) {
+                        fields.push(type_info);
+                    }
+                }
+            }
+            rustc_hir::VariantData::Tuple(field_defs, _, _) => {
+                for field in field_defs.iter() {
+                    if let Some(type_info) = self.extract_type_origin_info(&field.ty) {
+                        fields.push(type_info);
+                    }
+                }
+            }
+            rustc_hir::VariantData::Unit(_, _) => {}
+        }
+        fields
+    }
 }
 
 impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
@@ -1384,14 +2035,44 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
     fn visit_item(&mut self, item: &'tcx rustc_hir::Item<'_>) {
         // skip_generated_code!(item.span);
         let hir_id = item.hir_id();
-        // println!("{:?}",hir_id);
+        // Debug: Print what items are being visited
+        let item_kind = match &item.kind {
+            rustc_hir::ItemKind::ExternCrate(_) => "extern_crate",
+            rustc_hir::ItemKind::Use(_, _) => "use",
+            rustc_hir::ItemKind::Static(_, _, _) => "static",
+            rustc_hir::ItemKind::Const(_, _, _) => "const",
+            rustc_hir::ItemKind::Fn(_, _, _) => "fn",
+            rustc_hir::ItemKind::Mod(_) => "mod",
+            rustc_hir::ItemKind::ForeignMod { .. } => "foreign_mod",
+            rustc_hir::ItemKind::GlobalAsm(_) => "global_asm",
+            rustc_hir::ItemKind::TyAlias(_, _) => "type_alias",
+            rustc_hir::ItemKind::OpaqueTy(_) => "opaque_type",
+            rustc_hir::ItemKind::Enum(_, _) => "enum",
+            rustc_hir::ItemKind::Struct(_, _) => "struct",
+            rustc_hir::ItemKind::Union(_, _) => "union",
+            rustc_hir::ItemKind::Trait(_, _, _, _, _) => "trait",
+            rustc_hir::ItemKind::TraitAlias(_, _) => "trait_alias",
+            rustc_hir::ItemKind::Impl(_) => "impl",
+            rustc_hir::ItemKind::Macro(_, _) => "macro",
+        };
+        // println!("Visiting item: {:?} (kind: {}) in file: {:?}", 
+                //  item.ident.name, item_kind, self.format_span(item.span));
+        
+        // Track visited files
+        let file_path = self.format_span(item.span);
+        if !file_path.is_empty() {
+            self.visited_files.insert(file_path);
+        }
 
         // Handle modules - track module path for better function organization
-        if let rustc_hir::ItemKind::Mod(module) = &item.kind {
-            let def_id = hir_id.owner.to_def_id();
+        if let rustc_hir::ItemKind::Mod(_module) = &item.kind {
+            let _def_id = hir_id.owner.to_def_id();
+
+            // Process module declaration
+            self.process_module_declaration(item);
 
             // Push module to stack
-            self.push_module(self.format_span(module.spans.inner_span));
+            self.push_module(item.ident.to_string());
 
             // Process module items
             intravisit::walk_item(self, item);
@@ -1402,7 +2083,7 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
             return;
         }
 
-        if let rustc_hir::ItemKind::Fn(sig, generics, body_id) = item.kind {
+        if let rustc_hir::ItemKind::Fn(sig, _generics, body_id) = item.kind {
             let def_id = hir_id.owner.to_def_id();
             self.process_function_data(&sig, hir_id, body_id, item.span);
 
@@ -1410,7 +2091,8 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
 
             return;
         }
-        if let rustc_hir::ItemKind::Trait(is_auto, unsafety, generics, _bounds, trait_items_) =
+        
+        if let rustc_hir::ItemKind::Trait(_is_auto, _unsafety, _generics, _bounds, trait_items_) =
             item.kind
         {
             let def_id = hir_id.owner.to_def_id();
@@ -1428,6 +2110,13 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
 
         if let rustc_hir::ItemKind::Impl(impl_) = item.kind {
             let def_id = hir_id.owner.to_def_id();
+            
+            // Debug: Print impl block processing
+            // println!("Processing impl block in file: {:?}", self.format_span(item.span));
+            
+            // Process the impl block itself
+            self.process_impl_block(&impl_, hir_id, item.span);
+            
             for impl_item_ref in impl_.items {
                 let impl_item = self.tcx.hir().impl_item(impl_item_ref.id);
                 self.visit_impl_item(impl_item);
@@ -1435,6 +2124,35 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
             push_walk_pop!(self, def_id, intravisit::walk_item(self, item));
             return;
         }
+
+        // Handle use statements
+        if let rustc_hir::ItemKind::Use(_, _) = &item.kind {
+            self.process_use_statement(item, &rustc_hir::UseKind::Single);
+        }
+
+        // Handle type definitions
+        match &item.kind {
+            rustc_hir::ItemKind::Struct(_, _) => {
+                self.process_type_definition(item, "struct");
+            }
+            rustc_hir::ItemKind::Enum(_, _) => {
+                self.process_type_definition(item, "enum");
+            }
+            rustc_hir::ItemKind::Union(_, _) => {
+                self.process_type_definition(item, "union");
+            }
+            rustc_hir::ItemKind::TyAlias(_, _) => {
+                self.process_type_definition(item, "type_alias");
+            }
+            rustc_hir::ItemKind::Const(_, _, _) => {
+                self.process_constant_definition(item, false);
+            }
+            rustc_hir::ItemKind::Static(_, _, _) => {
+                self.process_constant_definition(item, true);
+            }
+            _ => {}
+        }
+
         // traverse
         intravisit::walk_item(self, item)
     }
@@ -1447,13 +2165,116 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
 
         match ti.kind {
             rustc_hir::TraitItemKind::Fn(sig, rustc_hir::TraitFn::Provided(body_id)) => {
+                // Trait method with implementation
                 self.process_function_data(&sig, hir_id, body_id, ti.span);
 
                 push_walk_pop!(self, def_id, intravisit::walk_trait_item(self, ti));
 
                 return;
             }
-            _ => {}
+            rustc_hir::TraitItemKind::Fn(sig, rustc_hir::TraitFn::Required(_)) => {
+                // Trait method signature only (no implementation)
+                self.process_trait_method_signature(&sig, hir_id, ti.span, &ti.ident.to_string());
+            }
+            rustc_hir::TraitItemKind::Const(ty, _default_body) => {
+                // Handle trait constants
+                let const_name = ti.ident.to_string();
+                let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+                let module_path = self.current_module_path();
+                
+                let fully_qualified_path = if module_path.is_empty() {
+                    format!("{}::{}", crate_name, const_name)
+                } else {
+                    format!("{}::{}::{}", crate_name, module_path, const_name)
+                };
+
+                let src_loc = self.format_span(ti.span);
+                let src_code = self
+                    .tcx
+                    .sess
+                    .source_map()
+                    .span_to_snippet(ti.span)
+                    .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+                let line_start = self.get_line_number(ti.span);
+                let line_end = self.tcx.sess.source_map().lookup_char_pos(ti.span.hi()).line;
+
+                let visibility = self.extract_visibility(hir_id.owner);
+                let doc_comments = self.extract_doc_comments(hir_id);
+                let attributes = self.get_attrs_string(hir_id);
+
+                let const_type = self.extract_type_origin_info(ty);
+
+                let const_def = ConstantDefinition {
+                    name: const_name,
+                    fully_qualified_path,
+                    const_type,
+                    src_location: src_loc,
+                    src_code,
+                    line_number_start: line_start,
+                    line_number_end: line_end,
+                    crate_name,
+                    module_path,
+                    visibility,
+                    doc_comments,
+                    attributes,
+                    is_static: false,
+                };
+
+                self.constant_definitions.push(const_def);
+            }
+            rustc_hir::TraitItemKind::Type(_bounds, default_ty) => {
+                // Handle associated types
+                let type_name = ti.ident.to_string();
+                let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+                let module_path = self.current_module_path();
+                
+                let fully_qualified_path = if module_path.is_empty() {
+                    format!("{}::{}", crate_name, type_name)
+                } else {
+                    format!("{}::{}::{}", crate_name, module_path, type_name)
+                };
+
+                let src_loc = self.format_span(ti.span);
+                let src_code = self
+                    .tcx
+                    .sess
+                    .source_map()
+                    .span_to_snippet(ti.span)
+                    .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+                let line_start = self.get_line_number(ti.span);
+                let line_end = self.tcx.sess.source_map().lookup_char_pos(ti.span.hi()).line;
+
+                let visibility = self.extract_visibility(hir_id.owner);
+                let doc_comments = self.extract_doc_comments(hir_id);
+                let attributes = self.get_attrs_string(hir_id);
+
+                let mut fields = Vec::new();
+                if let Some(default_ty) = default_ty {
+                    if let Some(type_info) = self.extract_type_origin_info(default_ty) {
+                        fields.push(type_info);
+                    }
+                }
+
+                let type_def = TypeDefinition {
+                    name: type_name,
+                    fully_qualified_path,
+                    type_kind: "associated_type".to_string(),
+                    fields,
+                    src_location: src_loc,
+                    src_code,
+                    line_number_start: line_start,
+                    line_number_end: line_end,
+                    crate_name,
+                    module_path,
+                    visibility,
+                    doc_comments,
+                    attributes,
+                };
+
+                self.type_definitions.push(type_def);
+            }
         }
 
         // traverse
@@ -1466,34 +2287,139 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
         let hir_id = ii.hir_id();
         let def_id = hir_id.owner.to_def_id();
 
-        if let rustc_hir::ImplItemKind::Fn(sig, body_id) = ii.kind {
-            // Process impl method data
-            self.process_function_data(&sig, hir_id, body_id, ii.span);
+        // Track visited files
+        let file_path = self.format_span(ii.span);
+        if !file_path.is_empty() {
+            self.visited_files.insert(file_path);
+        }
 
-            // store link to decl
-            let mut decl_id = None;
-            if let Some(impl_id) = self.tcx.impl_of_method(def_id) {
-                if let Some(rustc_hir::Node::Item(item)) = self.tcx.hir().get_if_local(impl_id) {
-                    if let rustc_hir::ItemKind::Impl(impl_) = &item.kind {
-                        // the next one filters methods that are just associated
-                        // and do not belong to a struct
-                        if let Some(trait_def_id) = self.tcx.trait_id_of_impl(impl_id) {
-                            let item = self
-                                .tcx
-                                .associated_items(trait_def_id)
-                                .filter_by_name_unhygienic(ii.ident.name)
-                                .next(); // There should ideally be only one item matching the name
-                            if let Some(item) = item {
-                                decl_id = Some(item.def_id);
-                            };
+        match ii.kind {
+            rustc_hir::ImplItemKind::Fn(sig, body_id) => {
+                // Process impl method data
+                self.process_function_data(&sig, hir_id, body_id, ii.span);
+
+                // store link to decl
+                let mut _decl_id = None;
+                if let Some(impl_id) = self.tcx.impl_of_method(def_id) {
+                    if let Some(rustc_hir::Node::Item(item)) = self.tcx.hir().get_if_local(impl_id) {
+                        if let rustc_hir::ItemKind::Impl(_impl_) = &item.kind {
+                            // the next one filters methods that are just associated
+                            // and do not belong to a struct
+                            if let Some(trait_def_id) = self.tcx.trait_id_of_impl(impl_id) {
+                                let item = self
+                                    .tcx
+                                    .associated_items(trait_def_id)
+                                    .filter_by_name_unhygienic(ii.ident.name)
+                                    .next(); // There should ideally be only one item matching the name
+                                if let Some(item) = item {
+                                    _decl_id = Some(item.def_id);
+                                };
+                            }
                         }
                     }
                 }
+
+                push_walk_pop!(self, def_id, intravisit::walk_impl_item(self, ii));
+
+                return;
             }
+            rustc_hir::ImplItemKind::Const(ty, _body_id) => {
+                // Handle impl constants
+                let const_name = ii.ident.to_string();
+                let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+                let module_path = self.current_module_path();
+                
+                let fully_qualified_path = if module_path.is_empty() {
+                    format!("{}::{}", crate_name, const_name)
+                } else {
+                    format!("{}::{}::{}", crate_name, module_path, const_name)
+                };
 
-            push_walk_pop!(self, def_id, intravisit::walk_impl_item(self, ii));
+                let src_loc = self.format_span(ii.span);
+                let src_code = self
+                    .tcx
+                    .sess
+                    .source_map()
+                    .span_to_snippet(ii.span)
+                    .unwrap_or_else(|_| "<<source unavailable>>".to_string());
 
-            return;
+                let line_start = self.get_line_number(ii.span);
+                let line_end = self.tcx.sess.source_map().lookup_char_pos(ii.span.hi()).line;
+
+                let visibility = self.extract_visibility(hir_id.owner);
+                let doc_comments = self.extract_doc_comments(hir_id);
+                let attributes = self.get_attrs_string(hir_id);
+
+                let const_type = self.extract_type_origin_info(ty);
+
+                let const_def = ConstantDefinition {
+                    name: const_name,
+                    fully_qualified_path,
+                    const_type,
+                    src_location: src_loc,
+                    src_code,
+                    line_number_start: line_start,
+                    line_number_end: line_end,
+                    crate_name,
+                    module_path,
+                    visibility,
+                    doc_comments,
+                    attributes,
+                    is_static: false,
+                };
+
+                self.constant_definitions.push(const_def);
+            }
+            rustc_hir::ImplItemKind::Type(ty) => {
+                // Handle associated type implementations
+                let type_name = ii.ident.to_string();
+                let crate_name = self.tcx.crate_name(def_id.krate).to_string();
+                let module_path = self.current_module_path();
+                
+                let fully_qualified_path = if module_path.is_empty() {
+                    format!("{}::{}", crate_name, type_name)
+                } else {
+                    format!("{}::{}::{}", crate_name, module_path, type_name)
+                };
+
+                let src_loc = self.format_span(ii.span);
+                let src_code = self
+                    .tcx
+                    .sess
+                    .source_map()
+                    .span_to_snippet(ii.span)
+                    .unwrap_or_else(|_| "<<source unavailable>>".to_string());
+
+                let line_start = self.get_line_number(ii.span);
+                let line_end = self.tcx.sess.source_map().lookup_char_pos(ii.span.hi()).line;
+
+                let visibility = self.extract_visibility(hir_id.owner);
+                let doc_comments = self.extract_doc_comments(hir_id);
+                let attributes = self.get_attrs_string(hir_id);
+
+                let mut fields = Vec::new();
+                if let Some(type_info) = self.extract_type_origin_info(ty) {
+                    fields.push(type_info);
+                }
+
+                let type_def = TypeDefinition {
+                    name: type_name,
+                    fully_qualified_path,
+                    type_kind: "associated_type_impl".to_string(),
+                    fields,
+                    src_location: src_loc,
+                    src_code,
+                    line_number_start: line_start,
+                    line_number_end: line_end,
+                    crate_name,
+                    module_path,
+                    visibility,
+                    doc_comments,
+                    attributes,
+                };
+
+                self.type_definitions.push(type_def);
+            }
         }
 
         // traverse
