@@ -24,7 +24,6 @@ fn analyze_and_suggest_better_command(metadata: &Metadata) {
     let mut has_features = false;
     let mut has_workspace = false;
     let mut has_tests = false;
-    let mut detected_patterns = Vec::new();
 
     // Check if this is a workspace
     if !metadata.workspace_members.is_empty() && metadata.workspace_members.len() > 1 {
@@ -36,22 +35,6 @@ fn analyze_and_suggest_better_command(metadata: &Metadata) {
         // Check for features
         if !package.features.is_empty() {
             has_features = true;
-            
-            // List some key features found
-            let feature_names: Vec<String> = package.features.keys().take(3).map(|s| s.clone()).collect();
-            if !feature_names.is_empty() {
-                detected_patterns.push(format!("Features found: {}", feature_names.join(", ")));
-            }
-        }
-        
-        // Check for common dependencies that suggest feature usage
-        for dep in &package.dependencies {
-            match dep.name.as_str() {
-                "tokio" => detected_patterns.push("Tokio detected - async runtime".to_string()),
-                "serde" => detected_patterns.push("Serde detected - serialization features likely".to_string()),
-                "clap" => detected_patterns.push("Clap detected - CLI features possible".to_string()),
-                _ => {}
-            }
         }
         
         // Check for tests by looking at targets instead of dev_dependencies
@@ -72,14 +55,6 @@ fn analyze_and_suggest_better_command(metadata: &Metadata) {
 
     println!("\n🎯 FDEP ANALYSIS COMPLETE!");
     println!("==========================================");
-    
-    if !detected_patterns.is_empty() {
-        println!("🔍 Detected patterns:");
-        for pattern in &detected_patterns {
-            println!("  • {}", pattern);
-        }
-        println!();
-    }
 
     // Generate suggestions
     if has_features && !used_all_features {
