@@ -2092,17 +2092,12 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
             return;
         }
         
-        if let rustc_hir::ItemKind::Trait(_is_auto, _unsafety, _generics, _bounds, trait_items_) =
+        if let rustc_hir::ItemKind::Trait(_is_auto, _unsafety, _generics, _bounds, _trait_items) =
             item.kind
         {
             let def_id = hir_id.owner.to_def_id();
 
-            // Process all trait items
-            for trait_item_ref in trait_items_ {
-                let trait_item = self.tcx.hir().trait_item(trait_item_ref.id);
-                self.visit_trait_item(trait_item);
-            }
-
+            // Let walk_item handle trait items automatically to avoid duplicates
             push_walk_pop!(self, def_id, intravisit::walk_item(self, item));
 
             return;
@@ -2111,16 +2106,10 @@ impl<'tcx> intravisit::Visitor<'tcx> for CallgraphVisitor<'tcx> {
         if let rustc_hir::ItemKind::Impl(impl_) = item.kind {
             let def_id = hir_id.owner.to_def_id();
             
-            // Debug: Print impl block processing
-            // println!("Processing impl block in file: {:?}", self.format_span(item.span));
-            
             // Process the impl block itself
             self.process_impl_block(&impl_, hir_id, item.span);
             
-            for impl_item_ref in impl_.items {
-                let impl_item = self.tcx.hir().impl_item(impl_item_ref.id);
-                self.visit_impl_item(impl_item);
-            }
+            // Let walk_item handle impl items automatically to avoid duplicates
             push_walk_pop!(self, def_id, intravisit::walk_item(self, item));
             return;
         }
