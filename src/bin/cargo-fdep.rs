@@ -19,6 +19,107 @@ fn show_error(msg: impl AsRef<str>) -> ! {
     std::process::exit(1)
 }
 
+fn analyze_and_suggest_better_command(metadata: &Metadata) {
+    let mut suggestions = Vec::new();
+    let mut has_features = false;
+    let mut has_workspace = false;
+    let mut has_tests = false;
+
+    // Check if this is a workspace
+    if !metadata.workspace_members.is_empty() && metadata.workspace_members.len() > 1 {
+        has_workspace = true;
+    }
+
+    // Analyze packages for features and patterns
+    for package in &metadata.packages {
+        // Check for features
+        if !package.features.is_empty() {
+            has_features = true;
+        }
+        
+        // Check for tests by looking at targets instead of dev_dependencies
+        for target in &package.targets {
+            if target.kind.contains(&"test".to_string()) {
+                has_tests = true;
+                break;
+            }
+        }
+    }
+
+    // Check the current command arguments to see what was used
+    let args: Vec<String> = std::env::args().collect();
+    let used_all_features = args.iter().any(|arg| arg == "--all-features");
+    let used_all_targets = args.iter().any(|arg| arg == "--all-targets");
+    let used_tests = args.iter().any(|arg| arg == "--tests");
+    let used_workspace = args.iter().any(|arg| arg == "--workspace");
+
+    println!("\n🎯 FDEP ANALYSIS COMPLETE!");
+    println!("==========================================");
+
+    // Generate suggestions
+    if has_features && !used_all_features {
+        suggestions.push("--all-features (to analyze all feature-gated code)".to_string());
+    }
+    
+    if !used_all_targets {
+        suggestions.push("--all-targets (to include tests, examples, benches)".to_string());
+    }
+    
+    if has_tests && !used_tests && !used_all_targets {
+        suggestions.push("--tests (to analyze test functions)".to_string());
+    }
+    
+    if has_workspace && !used_workspace {
+        suggestions.push("--workspace (to analyze all workspace members)".to_string());
+    }
+
+    if !suggestions.is_empty() {
+        println!("💡 For more comprehensive analysis, try:");
+        println!("==========================================");
+        
+        // Build the optimal command
+        let mut optimal_cmd = "cargo fdep".to_string();
+        
+        if has_workspace && !used_workspace {
+            optimal_cmd.push_str(" --workspace");
+        }
+        
+        if has_features && !used_all_features {
+            optimal_cmd.push_str(" --all-features");
+        }
+        
+        if !used_all_targets {
+            optimal_cmd.push_str(" --all-targets");
+        }
+        
+        println!("{}", optimal_cmd);
+        println!();
+        
+        // Explain why each flag is beneficial
+        println!("Why these flags help:");
+        for suggestion in &suggestions {
+            println!("  • {}", suggestion);
+        }
+        println!();
+    } else {
+        println!("✅ You're already using optimal flags for this project!");
+        println!();
+    }
+
+    // Show what was actually analyzed
+    println!("📊 Analysis Summary:");
+    println!("==========================================");
+    println!("  • Packages analyzed: {}", metadata.packages.len());
+    if has_features {
+        let total_features: usize = metadata.packages.iter().map(|p| p.features.len()).sum();
+        println!("  • Total features available: {}", total_features);
+    }
+    if has_workspace {
+        println!("  • Workspace members: {}", metadata.workspace_members.len());
+    }
+    println!();
+}
+
 // Determines whether a `--flag` is present.
 fn has_arg_flag(name: &str) -> bool {
     // Stop searching at `--`.
@@ -305,6 +406,9 @@ fn in_cargo_fdep() {
             }
         }
     }
+    
+    // After processing, suggest better commands
+    analyze_and_suggest_better_command(&metadata);
 }
 
 fn get_independant_packages(metadata: &Metadata) -> Vec<&Package> {
